@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/confirmation_dialog.dart';
 import '../../../shared/layout/app_shell.dart';
 import '../../../shared/layout/responsive_layout.dart';
-import '../data/mock_vehicles.dart';
+import '../data/vehicle_repository.dart';
 import '../models/vehicle.dart';
 import '../models/vehicle_status.dart';
 import '../models/vehicle_type.dart';
@@ -16,24 +17,38 @@ import '../widgets/vehicle_status_badge.dart';
 
 /// Screen displaying the inventory list of vehicles with filtering and CRUD actions.
 class VehicleListScreen extends StatefulWidget {
-  const VehicleListScreen({super.key});
+  final VehicleRepository? repository;
+
+  const VehicleListScreen({
+    super.key,
+    this.repository,
+  });
 
   @override
   State<VehicleListScreen> createState() => _VehicleListScreenState();
 }
 
 class _VehicleListScreenState extends State<VehicleListScreen> {
-  final _repository = VehicleRepository.instance;
+  late final VehicleRepository _repository;
   final _searchController = TextEditingController();
 
-  VehicleStatus? _selectedStatus;
-  VehicleType? _selectedType;
+  String? _selectedStatus;
+  String? _selectedType;
   String _searchQuery = '';
+  bool _isDeleting = false;
 
   @override
   void initState() {
     super.initState();
+    _repository = widget.repository ?? VehicleRepository.instance;
     _repository.addListener(_onRepositoryChanged);
+
+    // Initial load from Spring Boot API if vehicles list is not already initialized
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _repository.vehicles.isEmpty && !_repository.hasError) {
+        _fetchVehicles();
+      }
+    });
   }
 
   @override
@@ -47,6 +62,14 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _fetchVehicles() async {
+    try {
+      await _repository.fetchVehicles();
+    } catch (_) {
+      // Error state is captured in repository and handled in UI build
+    }
+  }
+
   void _resetFilters() {
     setState(() {
       _searchController.clear();
@@ -56,40 +79,73 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
     });
   }
 
-  void _navigateToCreate() {
-    Navigator.pushNamed(context, AppRoutes.vehicleRegister);
+  Future<void> _navigateToCreate() async {
+    final result = await Navigator.pushNamed(context, AppRoutes.vehicleRegister);
+    if (result == true && mounted) {
+      _fetchVehicles();
+    }
   }
 
-  void _navigateToEdit(Vehicle vehicle) {
-    Navigator.pushNamed(
+  Future<void> _navigateToEdit(Vehicle vehicle) async {
+    final result = await Navigator.pushNamed(
       context,
       AppRoutes.vehicleEdit,
       arguments: vehicle,
     );
+    if (result == true && mounted) {
+      _fetchVehicles();
+    }
   }
 
   Future<void> _handleDelete(Vehicle vehicle) async {
+    if (_isDeleting) return;
+
     final confirmed = await ConfirmationDialog.show(
       context,
       title: 'Delete Vehicle',
-      message: 'Are you sure you want to delete ${vehicle.displayName} (${vehicle.vehicleNumber})? This cannot be undone.',
+      message:
+          'Are you sure you want to delete ${vehicle.displayName} (${vehicle.vehicleNumber})? This cannot be undone.',
       confirmLabel: 'Delete',
       isDestructive: true,
     );
 
     if (confirmed == true && mounted) {
-      _repository.deleteVehicle(vehicle.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Vehicle ${vehicle.vehicleNumber} was deleted.'),
-          backgroundColor: AppColors.textPrimary,
-          action: SnackBarAction(
-            label: 'Undo',
-            textColor: Colors.amber,
-            onPressed: () => _repository.addVehicle(vehicle),
-          ),
-        ),
-      );
+      final id = vehicle.id ?? vehicle.vehicleNumber;
+      setState(() => _isDeleting = true);
+
+      try {
+        await _repository.deleteVehicle(id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Vehicle ${vehicle.vehicleNumber} was deleted successfully.'),
+              backgroundColor: AppColors.textPrimary,
+            ),
+          );
+        }
+      } on ApiException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete vehicle: ${e.message}'),
+              backgroundColor: AppColors.statusInactive,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete vehicle: $e'),
+              backgroundColor: AppColors.statusInactive,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isDeleting = false);
+        }
+      }
     }
   }
 
@@ -136,19 +192,118 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 3. Vehicles Table or Empty State Card
-              Card(
-                child: filteredVehicles.isEmpty
-                    ? _buildEmptyState(hasActiveFilters)
-                    : Responsive(
-                        desktop: _buildDesktopTable(filteredVehicles),
-                        mobile: _buildMobileCardList(filteredVehicles),
-                      ),
-              ),
+              // 3. Vehicles Content (Loading, Error, Empty, or Table)
+              _buildVehiclesContent(filteredVehicles, hasActiveFilters),
               const SizedBox(height: 24),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildVehiclesContent(List<Vehicle> filteredVehicles, bool hasActiveFilters) {
+    // 1. Loading State
+    if (_repository.isLoading && _repository.vehicles.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Loading fleet vehicles from server...',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Connecting to backend API',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 2. Error State (No silent fallback to mock data)
+    if (_repository.hasError && _repository.vehicles.isEmpty) {
+      return Card(
+        color: AppColors.statusInactiveBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+          side: const BorderSide(color: AppColors.statusInactive, width: 1),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    size: 48,
+                    color: AppColors.statusInactive,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Unable to Load Vehicles',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _repository.errorMessage ??
+                        'An error occurred while connecting to the Spring Boot backend.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  AppButton(
+                    label: 'Retry Connection',
+                    icon: Icons.refresh,
+                    onPressed: _fetchVehicles,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 3. Empty State (No vehicles in repository or no filter match)
+    if (filteredVehicles.isEmpty) {
+      return Card(
+        child: _buildEmptyState(hasActiveFilters),
+      );
+    }
+
+    // 4. Success State (Table on desktop, Card list on mobile)
+    return Card(
+      child: Responsive(
+        desktop: _buildDesktopTable(filteredVehicles),
+        mobile: _buildMobileCardList(filteredVehicles),
       ),
     );
   }
@@ -179,17 +334,17 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
         ),
         const SizedBox(width: 12),
 
-        // Status Filter Dropdown
+        // Status Filter Dropdown (plain string matching backend values)
         Expanded(
           flex: 2,
-          child: DropdownButtonFormField<VehicleStatus?>(
+          child: DropdownButtonFormField<String?>(
             key: ValueKey('desktop_status_$_selectedStatus'),
             initialValue: _selectedStatus,
             decoration: const InputDecoration(labelText: 'Status'),
             items: [
               const DropdownMenuItem(value: null, child: Text('All Statuses')),
-              ...VehicleStatus.values.map(
-                (s) => DropdownMenuItem(value: s, child: Text(s.label)),
+              ...VehicleStatus.dropdownValues.map(
+                (s) => DropdownMenuItem(value: s, child: Text(s)),
               ),
             ],
             onChanged: (val) => setState(() => _selectedStatus = val),
@@ -197,17 +352,17 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
         ),
         const SizedBox(width: 12),
 
-        // Type Filter Dropdown
+        // Type Filter Dropdown (plain string matching backend values)
         Expanded(
           flex: 2,
-          child: DropdownButtonFormField<VehicleType?>(
+          child: DropdownButtonFormField<String?>(
             key: ValueKey('desktop_type_$_selectedType'),
             initialValue: _selectedType,
             decoration: const InputDecoration(labelText: 'Vehicle Type'),
             items: [
               const DropdownMenuItem(value: null, child: Text('All Types')),
-              ...VehicleType.values.map(
-                (t) => DropdownMenuItem(value: t, child: Text(t.label)),
+              ...VehicleType.dropdownValues.map(
+                (t) => DropdownMenuItem(value: t, child: Text(t)),
               ),
             ],
             onChanged: (val) => setState(() => _selectedType = val),
@@ -251,15 +406,15 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
         Row(
           children: [
             Expanded(
-              child: DropdownButtonFormField<VehicleStatus?>(
+              child: DropdownButtonFormField<String?>(
                 key: ValueKey('mobile_status_$_selectedStatus'),
                 initialValue: _selectedStatus,
                 isDense: true,
                 decoration: const InputDecoration(labelText: 'Status'),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('All')),
-                  ...VehicleStatus.values.map(
-                    (s) => DropdownMenuItem(value: s, child: Text(s.label)),
+                  ...VehicleStatus.dropdownValues.map(
+                    (s) => DropdownMenuItem(value: s, child: Text(s)),
                   ),
                 ],
                 onChanged: (val) => setState(() => _selectedStatus = val),
@@ -267,15 +422,15 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: DropdownButtonFormField<VehicleType?>(
+              child: DropdownButtonFormField<String?>(
                 key: ValueKey('mobile_type_$_selectedType'),
                 initialValue: _selectedType,
                 isDense: true,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('All')),
-                  ...VehicleType.values.map(
-                    (t) => DropdownMenuItem(value: t, child: Text(t.label)),
+                  ...VehicleType.dropdownValues.map(
+                    (t) => DropdownMenuItem(value: t, child: Text(t)),
                   ),
                 ],
                 onChanged: (val) => setState(() => _selectedType = val),
@@ -355,9 +510,13 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(v.type.icon, size: 18, color: AppColors.primary),
+                          Icon(
+                            v.vehicleType.icon,
+                            size: 18,
+                            color: AppColors.primary,
+                          ),
                           const SizedBox(width: 8),
-                          Text(v.type.label),
+                          Text(v.type),
                         ],
                       ),
                     ),
@@ -416,7 +575,7 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
               color: AppColors.surfaceMuted,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(v.type.icon, color: AppColors.primary),
+            child: Icon(v.vehicleType.icon, color: AppColors.primary),
           ),
           title: Text(
             '${v.brand} ${v.model}',

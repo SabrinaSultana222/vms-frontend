@@ -423,7 +423,7 @@ class _TopHeaderBar extends StatelessWidget {
                 Icon(Icons.bolt, size: 14, color: AppColors.secondary),
                 SizedBox(width: 4),
                 Text(
-                  'Mock Data Mode',
+                  'Live API',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,

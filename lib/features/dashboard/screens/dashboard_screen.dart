@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/config/api_config.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
@@ -6,7 +7,7 @@ import '../../../core/utils/responsive.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/layout/app_shell.dart';
 import '../../../shared/layout/responsive_layout.dart';
-import '../../vehicles/data/mock_vehicles.dart';
+import '../../vehicles/data/vehicle_repository.dart';
 import '../../vehicles/models/vehicle.dart';
 import '../../vehicles/widgets/vehicle_stats_cards.dart';
 import '../../vehicles/widgets/vehicle_status_badge.dart';
@@ -26,6 +27,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _repository.addListener(_onRepositoryChanged);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _repository.vehicles.isEmpty && !_repository.hasError) {
+        _repository.fetchVehicles().catchError((_) => <Vehicle>[]);
+      }
+    });
   }
 
   @override
@@ -168,50 +175,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const Divider(height: 24),
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: vehicles.length,
-              separatorBuilder: (context, index) => const Divider(height: 16),
-              itemBuilder: (context, index) {
-                final v = vehicles[index];
-                return Row(
+            if (_repository.isLoading && _repository.vehicles.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_repository.hasError && _repository.vehicles.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Column(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(v.type.icon, size: 20, color: AppColors.primary),
+                    Text(
+                      _repository.errorMessage ?? 'Failed to load fleet data',
+                      style: const TextStyle(color: AppColors.statusInactive, fontSize: 13),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${v.brand} ${v.model}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            'No: ${v.vehicleNumber} • Company: ${v.company}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () => _repository.fetchVehicles().catchError((_) => <Vehicle>[]),
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Retry'),
                     ),
-                    VehicleStatusBadge(status: v.status),
                   ],
-                );
-              },
-            ),
+                ),
+              )
+            else if (vehicles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(
+                    'No vehicles currently in the fleet.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  ),
+                ),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: vehicles.length,
+                separatorBuilder: (context, index) => const Divider(height: 16),
+                itemBuilder: (context, index) {
+                  final v = vehicles[index];
+                  return Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceMuted,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          v.vehicleType.icon,
+                          size: 20,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${v.brand} ${v.model}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'No: ${v.vehicleNumber} • Company: ${v.company}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      VehicleStatusBadge(status: v.status),
+                    ],
+                  );
+                },
+              ),
           ],
         ),
       ),
@@ -256,7 +303,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Spring Boot Backend Integration Notes
+        // Spring Boot Backend Integration Card
         Card(
           color: const Color(0xFFF0FDF4),
           shape: RoundedRectangleBorder(
@@ -273,7 +320,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Icon(Icons.hub_outlined, color: Color(0xFF16A34A), size: 20),
                     SizedBox(width: 8),
                     Text(
-                      'Spring Boot Integration Ready',
+                      'Spring Boot REST API Active',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
@@ -284,7 +331,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'The models (Vehicle, VehicleStatus, VehicleType) include toJson/fromJson stubs for Vehicle Number, Company, Type, Brand, Model, and Status. Once the Spring Boot API is available, replace the VehicleRepository with an HTTP client.',
+                  'Connected to ${ApiConfig.baseUrl}. Operations: GET /api/vehicles, GET /api/vehicles/{id}, POST /api/vehicles, PUT /api/vehicles/{id}, DELETE /api/vehicles/{id}.',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.green.shade900,

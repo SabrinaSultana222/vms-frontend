@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_text_field.dart';
 import '../../../shared/layout/app_shell.dart';
 import '../../../shared/layout/responsive_layout.dart';
-import '../data/mock_vehicles.dart';
+import '../data/vehicle_repository.dart';
 import '../models/vehicle.dart';
 import '../models/vehicle_status.dart';
 import '../models/vehicle_type.dart';
 
 /// Screen for creating a new vehicle or editing an existing one.
 ///
-/// Fields: Vehicle Number, Company, Type, Brand, Model, and Status.
+/// Fields: id, vehicleNumber, company, type, brand, model, status.
 class VehicleFormScreen extends StatefulWidget {
   final Vehicle? initialVehicle;
 
@@ -35,8 +36,11 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
   late final TextEditingController _brandController;
   late final TextEditingController _modelController;
 
-  late VehicleType _selectedType;
-  late VehicleStatus _selectedStatus;
+  late String _selectedType;
+  late String _selectedStatus;
+
+  bool _isSaving = false;
+  String? _backendError;
 
   bool get isEditing => widget.initialVehicle != null;
 
@@ -50,8 +54,18 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
     _brandController = TextEditingController(text: v?.brand ?? '');
     _modelController = TextEditingController(text: v?.model ?? '');
 
-    _selectedType = v?.type ?? VehicleType.sedan;
-    _selectedStatus = v?.status ?? VehicleStatus.active;
+    // Match existing dropdown values as plain strings
+    final rawType = v?.type;
+    _selectedType = VehicleType.dropdownValues.firstWhere(
+      (d) => d.toLowerCase() == (rawType ?? 'Truck').toLowerCase(),
+      orElse: () => VehicleType.dropdownValues.first,
+    );
+
+    final rawStatus = v?.status;
+    _selectedStatus = VehicleStatus.dropdownValues.firstWhere(
+      (s) => s.toLowerCase() == (rawStatus ?? 'Active').toLowerCase(),
+      orElse: () => VehicleStatus.dropdownValues.first,
+    );
   }
 
   @override
@@ -63,56 +77,101 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
     super.dispose();
   }
 
-  void _handleSave() {
+  Future<void> _handleSave() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
+
+    setState(() {
+      _isSaving = true;
+      _backendError = null;
+    });
 
     final vehicleNumber = _vehicleNumberController.text.trim().toUpperCase();
     final company = _companyController.text.trim();
     final brand = _brandController.text.trim();
     final model = _modelController.text.trim();
 
-    if (isEditing) {
-      final updated = widget.initialVehicle!.copyWith(
-        vehicleNumber: vehicleNumber,
-        company: company,
-        type: _selectedType,
-        brand: brand,
-        model: model,
-        status: _selectedStatus,
-      );
+    try {
+      if (isEditing) {
+        final id = widget.initialVehicle!.id ?? widget.initialVehicle!.vehicleNumber;
+        final updated = widget.initialVehicle!.copyWith(
+          id: id,
+          vehicleNumber: vehicleNumber,
+          company: company,
+          type: _selectedType,
+          brand: brand,
+          model: model,
+          status: _selectedStatus,
+        );
 
-      VehicleRepository.instance.updateVehicle(updated);
+        await VehicleRepository.instance.updateVehicle(id, updated);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Vehicle ${updated.vehicleNumber} updated successfully!'),
-          backgroundColor: AppColors.statusActive,
-        ),
-      );
-    } else {
-      final newVehicle = Vehicle(
-        id: 'VMS-${100 + VehicleRepository.instance.totalCount + 1}',
-        vehicleNumber: vehicleNumber,
-        company: company,
-        type: _selectedType,
-        brand: brand,
-        model: model,
-        status: _selectedStatus,
-      );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Vehicle ${updated.vehicleNumber} updated successfully!'),
+              backgroundColor: AppColors.statusActive,
+            ),
+          );
+          Navigator.pop(context, true);
+        }
+      } else {
+        final newVehicle = Vehicle(
+          vehicleNumber: vehicleNumber,
+          company: company,
+          type: _selectedType,
+          brand: brand,
+          model: model,
+          status: _selectedStatus,
+        );
 
-      VehicleRepository.instance.addVehicle(newVehicle);
+        final created = await VehicleRepository.instance.createVehicle(newVehicle);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Vehicle ${newVehicle.vehicleNumber} registered successfully!'),
-          backgroundColor: AppColors.statusActive,
-        ),
-      );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Vehicle ${created.vehicleNumber} registered successfully!'),
+              backgroundColor: AppColors.statusActive,
+            ),
+          );
+          Navigator.pop(context, true);
+        }
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _backendError = e.message;
+          _isSaving = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.statusInactive,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _backendError = 'Failed to save vehicle: $e';
+          _isSaving = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save vehicle: $e'),
+            backgroundColor: AppColors.statusInactive,
+          ),
+        );
+      }
+    } finally {
+      if (mounted && _isSaving) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
-
-    Navigator.pop(context);
   }
 
   @override
@@ -143,6 +202,60 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                 // Top breadcrumb banner
                 _buildBreadcrumbs(),
                 const SizedBox(height: 16),
+
+                // Backend Error Banner
+                if (_backendError != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.statusInactiveBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.statusInactive),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: AppColors.statusInactive,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Backend Error',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: AppColors.statusInactive,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _backendError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 16),
+                          onPressed: () => setState(() => _backendError = null),
+                          tooltip: 'Dismiss',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 // Form Section 1: Vehicle Identification
                 Card(
@@ -195,7 +308,7 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                         ),
                         const SizedBox(height: 20),
                         _buildRow([
-                          // Vehicle Type Dropdown
+                          // Vehicle Type Dropdown (plain string matching backend values)
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -208,17 +321,21 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              DropdownButtonFormField<VehicleType>(
+                              DropdownButtonFormField<String>(
                                 initialValue: _selectedType,
                                 decoration: const InputDecoration(),
-                                items: VehicleType.values.map((t) {
+                                items: VehicleType.dropdownValues.map((t) {
                                   return DropdownMenuItem(
                                     value: t,
                                     child: Row(
                                       children: [
-                                        Icon(t.icon, size: 18, color: AppColors.primary),
+                                        Icon(
+                                          VehicleType.iconFor(t),
+                                          size: 18,
+                                          color: AppColors.primary,
+                                        ),
                                         const SizedBox(width: 8),
-                                        Text(t.label),
+                                        Text(t),
                                       ],
                                     ),
                                   );
@@ -229,7 +346,7 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                               ),
                             ],
                           ),
-                          // Operational Status Dropdown
+                          // Operational Status Dropdown (plain string matching backend values)
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -242,10 +359,10 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              DropdownButtonFormField<VehicleStatus>(
+                              DropdownButtonFormField<String>(
                                 initialValue: _selectedStatus,
                                 decoration: const InputDecoration(),
-                                items: VehicleStatus.values.map((s) {
+                                items: VehicleStatus.dropdownValues.map((s) {
                                   return DropdownMenuItem(
                                     value: s,
                                     child: Row(
@@ -254,12 +371,12 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                                           width: 8,
                                           height: 8,
                                           decoration: BoxDecoration(
-                                            color: s.color,
+                                            color: VehicleStatus.colorFor(s),
                                             shape: BoxShape.circle,
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        Text(s.label),
+                                        Text(s),
                                       ],
                                     ),
                                   );
@@ -303,13 +420,14 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
                     AppButton(
                       label: 'Cancel',
                       isOutlined: true,
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
                     ),
                     const SizedBox(width: 14),
                     AppButton(
                       label: isEditing ? 'Save Changes' : 'Register Vehicle',
                       icon: isEditing ? Icons.save_outlined : Icons.add,
-                      onPressed: _handleSave,
+                      isLoading: _isSaving,
+                      onPressed: _isSaving ? null : _handleSave,
                     ),
                   ],
                 ),
@@ -387,7 +505,6 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
     );
   }
 
-  /// Helper to render fields horizontally on desktop and vertically on mobile.
   Widget _buildRow(List<Widget> children) {
     return Responsive(
       desktop: Row(

@@ -3,38 +3,44 @@ import 'vehicle_type.dart';
 
 /// Data model representing a vehicle in the Vehicle Management System.
 ///
-/// Fields: Vehicle Number, Company, Type, Brand, Model, and Status.
+/// Fields: id, vehicleNumber, company, type, brand, model, status.
 class Vehicle {
-  final String id;
+  final String? id;
   final String vehicleNumber;
   final String company;
-  final VehicleType type;
+  final String type;
   final String brand;
   final String model;
-  final VehicleStatus status;
+  final String status;
 
   const Vehicle({
-    String? id,
+    this.id,
     required this.vehicleNumber,
     required this.company,
     required this.type,
     required this.brand,
     required this.model,
     required this.status,
-  }) : id = id ?? vehicleNumber;
+  });
 
   /// Convenient display name (e.g. "Toyota Camry (VN-1001)")
   String get displayName => '$brand $model ($vehicleNumber)';
+
+  /// Strongly-typed [VehicleType] helper for UI icons and categorization.
+  VehicleType get vehicleType => VehicleType.fromString(type);
+
+  /// Strongly-typed [VehicleStatus] helper for badge styling.
+  VehicleStatus get vehicleStatus => VehicleStatus.fromString(status);
 
   /// Creates a copy with modified fields.
   Vehicle copyWith({
     String? id,
     String? vehicleNumber,
     String? company,
-    VehicleType? type,
+    String? type,
     String? brand,
     String? model,
-    VehicleStatus? status,
+    String? status,
   }) {
     return Vehicle(
       id: id ?? this.id,
@@ -47,30 +53,44 @@ class Vehicle {
     );
   }
 
-  /// Converts this vehicle to a JSON map for Spring Boot API communication.
+  /// Converts this vehicle to a JSON map.
+  /// Exactly matches the backend fields: id (if present), vehicleNumber,
+  /// company, type, brand, model, status.
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
+      if (id != null) 'id': int.tryParse(id!) ?? id,
       'vehicleNumber': vehicleNumber,
       'company': company,
-      'type': type.name,
+      'type': type,
       'brand': brand,
       'model': model,
-      'status': status.name,
+      'status': status,
+    };
+  }
+
+  /// Converts this vehicle to the JSON map expected by the Spring Boot
+  /// POST and PUT request bodies (omits `id` to match VehicleRequest).
+  Map<String, dynamic> toRequestBody() {
+    return {
+      'vehicleNumber': vehicleNumber,
+      'company': company,
+      'type': type,
+      'brand': brand,
+      'model': model,
+      'status': status,
     };
   }
 
   /// Constructs a [Vehicle] from JSON map received from Spring Boot API.
   factory Vehicle.fromJson(Map<String, dynamic> json) {
-    final vNum = (json['vehicleNumber'] as String?) ?? '';
     return Vehicle(
-      id: (json['id'] as String?) ?? vNum,
-      vehicleNumber: vNum,
+      id: json['id']?.toString(),
+      vehicleNumber: (json['vehicleNumber'] as String?) ?? '',
       company: (json['company'] as String?) ?? '',
-      type: VehicleType.fromString(json['type'] as String?),
+      type: (json['type'] as String?) ?? '',
       brand: (json['brand'] as String?) ?? '',
       model: (json['model'] as String?) ?? '',
-      status: VehicleStatus.fromString(json['status'] as String?),
+      status: (json['status'] as String?) ?? '',
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vms_frontend/core/theme/app_theme.dart';
+import 'package:vms_frontend/features/vehicles/data/mock_vehicles.dart';
 import 'package:vms_frontend/features/vehicles/screens/vehicle_list_screen.dart';
 import 'package:vms_frontend/main.dart';
 
@@ -26,10 +27,12 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
 
+    final testRepo = VehicleRepository.withVehicles(mockVehicles);
+
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.lightTheme,
-        home: const VehicleListScreen(),
+        home: VehicleListScreen(repository: testRepo),
       ),
     );
     await tester.pumpAndSettle();
