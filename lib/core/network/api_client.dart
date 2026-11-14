@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../auth/auth_session.dart';
 import '../config/api_config.dart';
 import '../../features/vehicles/models/vehicle.dart';
 import 'api_exception.dart';
@@ -12,20 +13,39 @@ import 'api_exception.dart';
 /// - POST /api/vehicles (create, returns 201)
 /// - PUT /api/vehicles/{id} (update, returns 200)
 /// - DELETE /api/vehicles/{id} (delete, returns 204)
+///
+/// Attaches `Authorization: Bearer <token>` to every request when a session exists.
+/// If any vehicle request returns 401, clears the session and triggers unauthorized redirection.
 class VehicleApiClient {
   final http.Client _httpClient;
   final String _baseUrl;
+  final AuthSession _session;
 
   VehicleApiClient({
     http.Client? httpClient,
     String? baseUrl,
+    AuthSession? session,
   })  : _httpClient = httpClient ?? http.Client(),
-        _baseUrl = baseUrl ?? ApiConfig.normalizedBaseUrl;
+        _baseUrl = baseUrl ?? ApiConfig.normalizedBaseUrl,
+        _session = session ?? AuthSession.instance;
 
-  static const Map<String, String> _headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
+  Map<String, String> get _headers {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    final token = _session.token;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
+  void _checkUnauthorized(http.Response response) {
+    if (response.statusCode == 401) {
+      _session.handleUnauthorized();
+    }
+  }
 
   /// GET /api/vehicles
   ///
@@ -45,6 +65,7 @@ class VehicleApiClient {
         return [];
       }
 
+      _checkUnauthorized(response);
       throw ApiException.fromResponseBody(response.statusCode, response.body);
     } on ApiException {
       rethrow;
@@ -66,6 +87,7 @@ class VehicleApiClient {
         return Vehicle.fromJson(decoded as Map<String, dynamic>);
       }
 
+      _checkUnauthorized(response);
       throw ApiException.fromResponseBody(response.statusCode, response.body);
     } on ApiException {
       rethrow;
@@ -94,6 +116,7 @@ class VehicleApiClient {
         return Vehicle.fromJson(decoded as Map<String, dynamic>);
       }
 
+      _checkUnauthorized(response);
       throw ApiException.fromResponseBody(response.statusCode, response.body);
     } on ApiException {
       rethrow;
@@ -122,6 +145,7 @@ class VehicleApiClient {
         return Vehicle.fromJson(decoded as Map<String, dynamic>);
       }
 
+      _checkUnauthorized(response);
       throw ApiException.fromResponseBody(response.statusCode, response.body);
     } on ApiException {
       rethrow;
@@ -143,6 +167,7 @@ class VehicleApiClient {
         return;
       }
 
+      _checkUnauthorized(response);
       throw ApiException.fromResponseBody(response.statusCode, response.body);
     } on ApiException {
       rethrow;

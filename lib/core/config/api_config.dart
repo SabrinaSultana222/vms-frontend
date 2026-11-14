@@ -13,6 +13,9 @@ class ApiConfig {
   /// Path for the vehicle resources.
   static const String vehiclesPath = '/api/vehicles';
 
+  /// Path for the auth login endpoint.
+  static const String authLoginPath = '/api/auth/login';
+
   /// Returns the base URL stripped of any trailing slash.
   static String get normalizedBaseUrl {
     if (baseUrl.endsWith('/')) {
@@ -26,4 +29,7 @@ class ApiConfig {
 
   /// Full URI string for `/api/vehicles/{id}`.
   static String vehicleUri(String id) => '$normalizedBaseUrl$vehiclesPath/$id';
+
+  /// Full URI string for `/api/auth/login`.
+  static String get authLoginUri => '$normalizedBaseUrl$authLoginPath';
 }

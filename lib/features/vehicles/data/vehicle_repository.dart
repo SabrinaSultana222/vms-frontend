@@ -156,6 +156,14 @@ class VehicleRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Clears in-memory vehicle cache and resets states (e.g. on logout).
+  void clear() {
+    _vehicles.clear();
+    _errorMessage = null;
+    _isLoading = false;
+    notifyListeners();
+  }
+
   /// Filters vehicles by search query, status string, and type string.
   List<Vehicle> filter({
     String? query,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/auth/auth_session.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
 import '../../../core/network/api_exception.dart';
@@ -47,6 +48,21 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
   @override
   void initState() {
     super.initState();
+    if (!AuthSession.instance.isAuthenticated) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+        }
+      });
+      _vehicleNumberController = TextEditingController();
+      _companyController = TextEditingController();
+      _brandController = TextEditingController();
+      _modelController = TextEditingController();
+      _selectedType = VehicleType.dropdownValues.first;
+      _selectedStatus = VehicleStatus.dropdownValues.first;
+      return;
+    }
+
     final v = widget.initialVehicle;
 
     _vehicleNumberController = TextEditingController(text: v?.vehicleNumber ?? '');
@@ -176,6 +192,14 @@ class _VehicleFormScreenState extends State<VehicleFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthSession.instance.isAuthenticated) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     final title = isEditing
         ? 'Edit Vehicle: ${widget.initialVehicle!.vehicleNumber}'
         : 'Register New Vehicle';

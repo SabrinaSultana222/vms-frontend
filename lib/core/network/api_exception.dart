@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../config/api_config.dart';
 
 /// Exception thrown when an API request fails.
 class ApiException implements Exception {
@@ -65,7 +66,7 @@ class ApiException implements Exception {
     return ApiException(
       statusCode: 0,
       message:
-          'Unable to connect to the backend server. Please check your network connection and ensure the Spring Boot API is running at http://localhost:8080.',
+          'Unable to connect to the backend server. Please check your network connection and ensure the Spring Boot API is running at ${ApiConfig.baseUrl}.',
       error: cause?.toString(),
     );
   }
@@ -74,6 +75,8 @@ class ApiException implements Exception {
     switch (code) {
       case 400:
         return 'Invalid vehicle data provided. Please check the required fields.';
+      case 401:
+        return 'Unauthorized. Please sign in to continue.';
       case 404:
         return 'The requested vehicle was not found.';
       case 409:

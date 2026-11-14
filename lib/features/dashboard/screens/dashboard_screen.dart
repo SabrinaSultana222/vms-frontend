@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/auth/auth_session.dart';
 import '../../../core/config/api_config.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
@@ -14,19 +15,31 @@ import '../../vehicles/widgets/vehicle_status_badge.dart';
 
 /// High-level fleet overview dashboard screen.
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final VehicleRepository? repository;
+
+  const DashboardScreen({super.key, this.repository});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final _repository = VehicleRepository.instance;
+  late final VehicleRepository _repository;
 
   @override
   void initState() {
     super.initState();
+    _repository = widget.repository ?? VehicleRepository.instance;
     _repository.addListener(_onRepositoryChanged);
+
+    if (!AuthSession.instance.isAuthenticated && widget.repository == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+        }
+      });
+      return;
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _repository.vehicles.isEmpty && !_repository.hasError) {
@@ -47,6 +60,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthSession.instance.isAuthenticated && widget.repository == null) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
     final recentVehicles = _repository.vehicles.take(5).toList();
 
     return AppShell(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/auth/auth_session.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
 import '../../../core/network/api_exception.dart';
@@ -45,7 +46,12 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
 
     // Initial load from Spring Boot API if vehicles list is not already initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _repository.vehicles.isEmpty && !_repository.hasError) {
+      if (!mounted) return;
+      if (!AuthSession.instance.isAuthenticated && widget.repository == null) {
+        Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+        return;
+      }
+      if (_repository.vehicles.isEmpty && !_repository.hasError) {
         _fetchVehicles();
       }
     });
@@ -63,6 +69,12 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
   }
 
   Future<void> _fetchVehicles() async {
+    if (!AuthSession.instance.isAuthenticated && widget.repository == null) {
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+      }
+      return;
+    }
     try {
       await _repository.fetchVehicles();
     } catch (_) {
@@ -151,6 +163,14 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthSession.instance.isAuthenticated && widget.repository == null) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     final filteredVehicles = _repository.filter(
       query: _searchQuery,
       status: _selectedStatus,

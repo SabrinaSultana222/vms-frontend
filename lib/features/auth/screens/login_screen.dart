@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_routes.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/components/app_button.dart';
 import '../../../shared/components/app_text_field.dart';
+import '../services/auth_service.dart';
 
-/// Clean desktop-first authentication screen.
+/// Clean desktop-first authentication screen connected to Spring Boot auth API.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final AuthService? authService;
+
+  const LoginScreen({
+    super.key,
+    this.authService,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -18,9 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  bool _rememberMe = true;
   bool _isLoading = false;
   bool _obscurePassword = true;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -29,28 +36,47 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _fillDemoCredentials() {
-    setState(() {
-      _emailController.text = AppConstants.demoEmail;
-      _passwordController.text = AppConstants.demoPassword;
-    });
-  }
-
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-    // Simulate authentication delay for smooth UX
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      final authService = widget.authService ?? AuthService();
+      await authService.login(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() => _isLoading = false);
 
-    // Navigate to the main vehicle overview screen
-    Navigator.pushReplacementNamed(context, AppRoutes.vehicles);
+      // Navigate to the main vehicle overview screen
+      Navigator.pushReplacementNamed(context, AppRoutes.vehicles);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'An unexpected error occurred. Please try again.';
+      });
+    }
+  }
+
+  void _clearErrorIfPresent() {
+    if (_errorMessage != null) {
+      setState(() => _errorMessage = null);
+    }
   }
 
   @override
@@ -110,41 +136,39 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 28),
 
-                      // Demo credentials quick-fill banner
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFBFDBFE)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, size: 18, color: AppColors.primary),
-                            const SizedBox(width: 10),
-                            const Expanded(
-                              child: Text(
-                                'Demo: admin@vms.com / admin',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.primaryDark,
-                                  fontWeight: FontWeight.w500,
+                      // Error message banner for invalid credentials or connection issues
+                      if (_errorMessage != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.statusInactiveBg,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.statusInactive),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                size: 20,
+                                color: AppColors.statusInactive,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: const TextStyle(
+                                    color: AppColors.statusInactive,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
-                            ),
-                            TextButton(
-                              onPressed: _fillDemoCredentials,
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text('Auto-Fill', style: TextStyle(fontSize: 12)),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
+                        const SizedBox(height: 20),
+                      ],
 
                       // Email input
                       AppTextField(
@@ -153,6 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         hint: 'admin@vms.com',
                         keyboardType: TextInputType.emailAddress,
                         prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                        onChanged: (_) => _clearErrorIfPresent(),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return 'Please enter your email';
@@ -172,6 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         hint: '••••••••',
                         obscureText: _obscurePassword,
                         prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                        onChanged: (_) => _clearErrorIfPresent(),
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
@@ -189,50 +215,28 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Remember me & Forgot Password
-                      Wrap(
-                        alignment: WrapAlignment.spaceBetween,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        runSpacing: 8,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: Checkbox(
-                                  value: _rememberMe,
-                                  onChanged: (val) => setState(() => _rememberMe = val ?? false),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Remember me',
-                                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                              ),
-                            ],
+                      // Forgot Password Link
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          TextButton(
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Password reset will be handled by Spring Boot auth.'),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                            child: const Text(
-                              'Forgot password?',
-                              style: TextStyle(fontSize: 13),
-                            ),
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Contact your fleet administrator for password assistance.'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Forgot password?',
+                            style: TextStyle(fontSize: 13),
                           ),
-                        ],
+                        ),
                       ),
                       const SizedBox(height: 24),
 
@@ -247,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       // Footer note
                       const Text(
-                        'Frontend Prototype • Material 3 • Ready for REST API',
+                        'Fleet Platform • Material 3 • Spring Boot REST API',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 11,

@@ -24,8 +24,4 @@ class AppConstants {
   static const double radiusSmall = 6.0;
   static const double radiusMedium = 12.0;
   static const double radiusLarge = 16.0;
-
-  // Demo user credentials for quick login testing
-  static const String demoEmail = 'admin@vms.com';
-  static const String demoPassword = 'admin';
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../core/auth/auth_session.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_routes.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/responsive.dart';
+import '../../features/vehicles/data/vehicle_repository.dart';
 import '../components/confirmation_dialog.dart';
 
 /// Desktop-first application shell providing persistent sidebar navigation,
@@ -206,59 +208,83 @@ class _DesktopSidebar extends StatelessWidget {
 
           // System info & User Profile footer
           const Divider(height: 1, color: AppColors.border),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppColors.primary,
-                  child: Text(
-                    'AD',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Admin User',
-                        style: TextStyle(
+          ListenableBuilder(
+            listenable: AuthSession.instance,
+            builder: (context, _) {
+              final userEmail = AuthSession.instance.email ?? '';
+              final userName = AuthSession.instance.userName ?? 'User';
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: AppColors.primary,
+                      child: Text(
+                        _userInitials(userEmail, userName),
+                        style: const TextStyle(
+                          color: Colors.white,
                           fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.bold,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
-                        'admin@vms.com',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            userName,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (userEmail.isNotEmpty)
+                            Text(
+                              userEmail,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.logout, size: 18, color: AppColors.textSecondary),
+                      tooltip: 'Sign Out',
+                      onPressed: () => _handleLogout(context),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.logout, size: 18, color: AppColors.textSecondary),
-                  tooltip: 'Sign Out',
-                  onPressed: () => _handleLogout(context),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         ],
       ),
     );
+  }
+
+  static String _userInitials(String? email, [String? name]) {
+    if (name != null && name.trim().isNotEmpty && name.trim() != 'User') {
+      final parts = name.trim().split(RegExp(r'\s+'));
+      if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+        return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+      }
+      return name.trim().substring(0, name.trim().length >= 2 ? 2 : 1).toUpperCase();
+    }
+    if (email == null || email.trim().isEmpty) return 'U';
+    final parts = email.split('@').first.split(RegExp(r'[._\-]'));
+    if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return email.substring(0, email.length >= 2 ? 2 : 1).toUpperCase();
   }
 
   void _navigate(BuildContext context, String route) {
@@ -271,11 +297,13 @@ class _DesktopSidebar extends StatelessWidget {
     final confirmed = await ConfirmationDialog.show(
       context,
       title: 'Sign Out',
-      message: 'Are you sure you want to end your current admin session?',
+      message: 'Are you sure you want to end your current session?',
       confirmLabel: 'Sign Out',
     );
     if (confirmed == true && context.mounted) {
-      Navigator.pushReplacementNamed(context, AppRoutes.login);
+      AuthSession.instance.clear();
+      VehicleRepository.instance.clear();
+      Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
     }
   }
 }
@@ -496,13 +524,50 @@ class _MobileDrawer extends StatelessWidget {
               },
             ),
             const Spacer(),
+            if (AuthSession.instance.isAuthenticated) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.primary,
+                  child: Text(
+                    _DesktopSidebar._userInitials(
+                      AuthSession.instance.email,
+                      AuthSession.instance.userName,
+                    ),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  AuthSession.instance.userName ?? 'User',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                subtitle: AuthSession.instance.email != null && AuthSession.instance.email!.isNotEmpty
+                    ? Text(AuthSession.instance.email!, style: const TextStyle(fontSize: 12))
+                    : null,
+              ),
+            ],
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.logout, color: AppColors.statusInactive),
               title: const Text('Sign Out', style: TextStyle(color: AppColors.statusInactive)),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, AppRoutes.login);
+                final confirmed = await ConfirmationDialog.show(
+                  context,
+                  title: 'Sign Out',
+                  message: 'Are you sure you want to end your current session?',
+                  confirmLabel: 'Sign Out',
+                );
+                if (confirmed == true && context.mounted) {
+                  AuthSession.instance.clear();
+                  VehicleRepository.instance.clear();
+                  Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+                }
               },
             ),
           ],
